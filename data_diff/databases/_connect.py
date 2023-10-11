@@ -24,6 +24,7 @@ from data_diff.databases.clickhouse import Clickhouse
 from data_diff.databases.vertica import Vertica
 from data_diff.databases.duckdb import DuckDB
 from data_diff.databases.mssql import MsSQL
+from data_diff.databases.clickzetta import Clickzetta
 
 
 @attrs.define(frozen=True)
@@ -90,6 +91,7 @@ DATABASE_BY_SCHEME = {
     "clickhouse": Clickhouse,
     "vertica": Vertica,
     "mssql": MsSQL,
+    "clickzetta": Clickzetta,
 }
 
 
@@ -136,6 +138,7 @@ class Connect:
         - clickhouse
         - vertica
         - duckdb
+        - clickzetta
         """
 
         dsn = dsnparse.parse(db_uri)
@@ -170,6 +173,17 @@ class Connect:
             kw["http_path"] = dsn.path
             kw["server_hostname"] = dsn.host
             kw.update(dsn.query)
+        elif scheme == "clickzetta":
+            kw = {}
+            kw["username"] = dsn.user
+            kw["password"] = dsn.password
+            instance_and_service = dsn.host.split(".", 1)
+            assert len(instance_and_service) == 2
+            kw["instance"] = instance_and_service[0]
+            kw["service"] = instance_and_service[1]
+            kw["workspace"] = dsn.database
+            for k, v in dsn.query.items():
+                kw[k] = v
         elif scheme == "duckdb":
             kw = {}
             kw["filepath"] = dsn.dbname
@@ -226,7 +240,7 @@ class Connect:
         return db
 
     def __call__(
-        self, db_conf: Union[str, dict], thread_count: Optional[int] = 1, shared: bool = True, **kwargs
+            self, db_conf: Union[str, dict], thread_count: Optional[int] = 1, shared: bool = True, **kwargs
     ) -> Database:
         """Connect to a database using the given database configuration.
 
@@ -258,6 +272,7 @@ class Connect:
         - trino
         - clickhouse
         - vertica
+        - clickzetta
 
         Example:
             >>> connect("mysql://localhost/db")
