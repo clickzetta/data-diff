@@ -1,4 +1,6 @@
+import logging
 from typing import Any, ClassVar, Dict, List, Type
+from urllib.parse import unquote
 
 import attrs
 
@@ -29,6 +31,9 @@ from data_diff.databases.base import (
 )
 
 SESSION_TIME_ZONE = None  # Changed by the tests
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 @import_helper("postgresql")
@@ -147,6 +152,7 @@ class PostgreSQL(ThreadedDatabase):
 
         pg = import_postgresql()
         try:
+            self._args["password"] = unquote(self._args['password'])
             self._conn = pg.connect(
                 **self._args, keepalives=1, keepalives_idle=5, keepalives_interval=2, keepalives_count=2
             )

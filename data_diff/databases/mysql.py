@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, Dict, Union
 
 import attrs
 
@@ -25,7 +25,7 @@ from data_diff.databases.base import (
     import_helper,
     ConnectError,
     BaseDialect,
-    Compilable,
+    Compilable, ThreadLocalInterpreter,
 )
 from data_diff.databases.base import (
     MD5_HEXDIGITS,
@@ -47,7 +47,7 @@ def import_mysql():
 @attrs.define(frozen=False)
 class Mixin_MD5(AbstractMixin_MD5):
     def md5_as_int(self, s: str) -> str:
-        return f"cast(conv(substring(md5({s}), {1+MD5_HEXDIGITS-CHECKSUM_HEXDIGITS}), 16, 10) as unsigned)"
+        return f"cast(conv(substring(md5({s}), {1 + MD5_HEXDIGITS - CHECKSUM_HEXDIGITS}), 16, 10) as unsigned)"
 
 
 @attrs.define(frozen=False)
@@ -57,7 +57,7 @@ class Mixin_NormalizeValue(AbstractMixin_NormalizeValue):
             return self.to_string(f"cast( cast({value} as datetime({coltype.precision})) as datetime(6))")
 
         s = self.to_string(f"cast({value} as datetime(6))")
-        return f"RPAD(RPAD({s}, {TIMESTAMP_PRECISION_POS+coltype.precision}, '.'), {TIMESTAMP_PRECISION_POS+6}, '0')"
+        return f"RPAD(RPAD({s}, {TIMESTAMP_PRECISION_POS + coltype.precision}, '.'), {TIMESTAMP_PRECISION_POS + 6}, '0')"
 
     def normalize_number(self, value: str, coltype: FractionalType) -> str:
         return self.to_string(f"cast({value} as decimal(38, {coltype.precision}))")
@@ -146,6 +146,7 @@ class MySQL(ThreadedDatabase):
     CONNECT_URI_PARAMS = ["database?"]
 
     _args: Dict[str, Any]
+    _conn: Any
 
     def __init__(self, *, thread_count, **kw):
         super().__init__(thread_count=thread_count)
@@ -160,10 +161,20 @@ class MySQL(ThreadedDatabase):
     def create_connection(self):
         mysql = import_mysql()
         try:
-            return mysql.connect(charset="utf8", use_unicode=True, **self._args)
+            self._conn = mysql.connect(charset="utf8", use_unicode=True, **self._args)
+            self._conn.ping(reconnect=True, attempts=3, delay=1)
+            return self._conn
         except mysql.Error as e:
             if e.errno == mysql.errorcode.ER_ACCESS_DENIED_ERROR:
                 raise ConnectError("Bad user name or password") from e
             elif e.errno == mysql.errorcode.ER_BAD_DB_ERROR:
                 raise ConnectError("Database does not exist") from e
             raise ConnectError(*e.args) from e
+
+    def _query_in_worker(self, sql_code: Union[str, ThreadLocalInterpreter]):
+        "This method runs in a worker thread"
+        if self._init_error:
+            raise self._init_error
+        if not self.thread_local.conn.is_connected():
+            self.thread_local.conn.ping(reconnect=True, attempts=3, delay=5)
+        return self._query_conn(self.thread_local.conn, sql_code)
